@@ -133,3 +133,25 @@ def test_smooth_flags_removes_flicker():
     f[20:30] = True
     out = smooth_flags(f, 5)
     assert not out[10] and out[25]
+
+
+def test_prepare_video_reports_missing_file(tmp_path):
+    from horsetrack.pipeline import prepare_video
+
+    with pytest.raises(FileNotFoundError, match="Movies"):
+        prepare_video(str(tmp_path / "Videos" / "IMG_0001.MOV"), tmp_path)
+
+
+def test_prepare_video_converts_unreadable_file(tmp_path):
+    import shutil
+    import subprocess
+
+    from horsetrack.pipeline import _readable, prepare_video
+
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    src = tmp_path / "clip.MOV"  # HEVC in a QuickTime container, like an iPhone clip
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30",
+                    "-t", "1", "-c:v", "libx265", "-tag:v", "hvc1", str(src)], check=True)
+    out = prepare_video(str(src), tmp_path / "out")
+    assert _readable(out)

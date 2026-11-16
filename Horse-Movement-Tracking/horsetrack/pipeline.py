@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from dataclasses import asdict, dataclass
+import sys
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -59,6 +60,45 @@ class Result:
     metrics: pd.DataFrame
     video_path: Path | None
     plots: list[Path]
+
+
+def _readable(path: str) -> bool:
+    cap = cv2.VideoCapture(path)
+    ok = cap.isOpened() and cap.read()[0]
+    cap.release()
+    return bool(ok)
+
+
+def prepare_video(path: str, work_dir: Path) -> str:
+    """Return a path OpenCV can decode.
+
+    iPhone clips (.MOV, HEVC/H.265, often HDR or Dolby Vision) are frequently
+    not decodable by the OpenCV wheels; they are converted to H.264 with
+    ffmpeg when available.
+    """
+    p = Path(path).expanduser()
+    if not p.is_file():
+        hint = ""
+        if "/Videos/" in str(p):
+            hint = " (on macOS the default video folder is ~/Movies)"
+        raise FileNotFoundError(f"Video file not found: {p}{hint}")
+    if _readable(str(p)):
+        return str(p)
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError(
+            f"OpenCV cannot decode {p.name} (iPhone videos are usually HEVC/H.265). "
+            "Install ffmpeg (macOS: `brew install ffmpeg`) and run again, or convert it to H.264 MP4 first."
+        )
+    work_dir.mkdir(parents=True, exist_ok=True)
+    converted = work_dir / f"{p.stem}_h264.mp4"
+    print(f"Converting {p.name} to H.264 so OpenCV can read it -> {converted}", file=sys.stderr)
+    r = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", str(p), "-map", "0:v:0", "-an",
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
+                        str(converted)])
+    if r.returncode != 0 or not _readable(str(converted)):
+        raise RuntimeError(f"Could not convert {p} with ffmpeg.")
+    return str(converted)
 
 
 def _video_info(path: str) -> tuple[float, int, int, int]:
@@ -112,6 +152,7 @@ def run(cfg: Config, progress: ProgressFn | None = None,
     out.mkdir(parents=True, exist_ok=True)
     layout = pose.layout if pose is not None else load_layout(cfg.layout)
 
+    cfg = replace(cfg, video=prepare_video(cfg.video, out))
     fps_src, n_src, W, H = _video_info(cfg.video)
     fps = fps_src / cfg.every
     total = (n_src + cfg.every - 1) // cfg.every if n_src > 0 else 0
