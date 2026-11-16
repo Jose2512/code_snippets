@@ -1,0 +1,8 @@
+models/
+outputs/
+runs/
+datasets/
+*.pt
+*.onnx
+*.mp4
+*.egg-info/

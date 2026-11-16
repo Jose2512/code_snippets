@@ -1,0 +1,46 @@
+{
+  "name": "horse27",
+  "keypoints": [
+    "Nose", "Poll", "L_Eye", "R_Eye", "Withers", "Croup", "Tail_base",
+    "LF_Shoulder", "LF_Elbow", "LF_Carpus", "LF_Fetlock", "LF_Hoof",
+    "RF_Shoulder", "RF_Elbow", "RF_Carpus", "RF_Fetlock", "RF_Hoof",
+    "LH_Hip", "LH_Stifle", "LH_Hock", "LH_Fetlock", "LH_Hoof",
+    "RH_Hip", "RH_Stifle", "RH_Hock", "RH_Fetlock", "RH_Hoof"
+  ],
+  "skeleton": [
+    ["Nose", "Poll"], ["L_Eye", "Poll"], ["R_Eye", "Poll"], ["Poll", "Withers"],
+    ["Withers", "Croup"], ["Croup", "Tail_base"],
+    ["Withers", "LF_Shoulder"], ["LF_Shoulder", "LF_Elbow"], ["LF_Elbow", "LF_Carpus"], ["LF_Carpus", "LF_Fetlock"], ["LF_Fetlock", "LF_Hoof"],
+    ["Withers", "RF_Shoulder"], ["RF_Shoulder", "RF_Elbow"], ["RF_Elbow", "RF_Carpus"], ["RF_Carpus", "RF_Fetlock"], ["RF_Fetlock", "RF_Hoof"],
+    ["Croup", "LH_Hip"], ["LH_Hip", "LH_Stifle"], ["LH_Stifle", "LH_Hock"], ["LH_Hock", "LH_Fetlock"], ["LH_Fetlock", "LH_Hoof"],
+    ["Croup", "RH_Hip"], ["RH_Hip", "RH_Stifle"], ["RH_Stifle", "RH_Hock"], ["RH_Hock", "RH_Fetlock"], ["RH_Fetlock", "RH_Hoof"]
+  ],
+  "angles": [
+    {"name": "LF_elbow",   "points": ["LF_Shoulder", "LF_Elbow", "LF_Carpus"]},
+    {"name": "LF_carpus",  "points": ["LF_Elbow", "LF_Carpus", "LF_Fetlock"]},
+    {"name": "LF_fetlock", "points": ["LF_Carpus", "LF_Fetlock", "LF_Hoof"]},
+    {"name": "RF_elbow",   "points": ["RF_Shoulder", "RF_Elbow", "RF_Carpus"]},
+    {"name": "RF_carpus",  "points": ["RF_Elbow", "RF_Carpus", "RF_Fetlock"]},
+    {"name": "RF_fetlock", "points": ["RF_Carpus", "RF_Fetlock", "RF_Hoof"]},
+    {"name": "LH_stifle",  "points": ["LH_Hip", "LH_Stifle", "LH_Hock"]},
+    {"name": "LH_hock",    "points": ["LH_Stifle", "LH_Hock", "LH_Fetlock"]},
+    {"name": "LH_fetlock", "points": ["LH_Hock", "LH_Fetlock", "LH_Hoof"]},
+    {"name": "RH_stifle",  "points": ["RH_Hip", "RH_Stifle", "RH_Hock"]},
+    {"name": "RH_hock",    "points": ["RH_Stifle", "RH_Hock", "RH_Fetlock"]},
+    {"name": "RH_fetlock", "points": ["RH_Hock", "RH_Fetlock", "RH_Hoof"]},
+    {"name": "poll",       "points": ["Nose", "Poll", "Withers"]}
+  ],
+  "limbs": {
+    "LF": ["LF_Shoulder", "LF_Elbow", "LF_Carpus", "LF_Fetlock", "LF_Hoof"],
+    "RF": ["RF_Shoulder", "RF_Elbow", "RF_Carpus", "RF_Fetlock", "RF_Hoof"],
+    "LH": ["LH_Hip", "LH_Stifle", "LH_Hock", "LH_Fetlock", "LH_Hoof"],
+    "RH": ["RH_Hip", "RH_Stifle", "RH_Hock", "RH_Fetlock", "RH_Hoof"]
+  },
+  "head": {"nose": "Nose", "neck": "Withers", "poll": "Poll", "eyes": ["L_Eye", "R_Eye"]},
+  "body_axis": ["Withers", "Croup"],
+  "flip_pairs": [
+    ["L_Eye", "R_Eye"],
+    ["LF_Shoulder", "RF_Shoulder"], ["LF_Elbow", "RF_Elbow"], ["LF_Carpus", "RF_Carpus"], ["LF_Fetlock", "RF_Fetlock"], ["LF_Hoof", "RF_Hoof"],
+    ["LH_Hip", "RH_Hip"], ["LH_Stifle", "RH_Stifle"], ["LH_Hock", "RH_Hock"], ["LH_Fetlock", "RH_Fetlock"], ["LH_Hoof", "RH_Hoof"]
+  ]
+}

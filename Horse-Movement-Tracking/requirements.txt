@@ -1,0 +1,9 @@
+numpy>=1.24
+opencv-python-headless>=4.8
+pandas>=2.0
+scipy>=1.10
+matplotlib>=3.7
+onnxruntime>=1.16        # use onnxruntime-gpu for CUDA
+ultralytics>=8.3
+lap>=0.5                 # ByteTrack tracker dependency
+streamlit>=1.40          # web UI (optional)
