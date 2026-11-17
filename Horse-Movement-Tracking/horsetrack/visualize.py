@@ -97,6 +97,29 @@ class Renderer:
             self._hud(img, hud)
         return img
 
+    def draw_rider(self, img: np.ndarray, p: np.ndarray, direction: float = 1.0) -> None:
+        """Rider skeleton (COCO) and the vertical reference line through the hip."""
+        if p is None or not np.isfinite(p).any():
+            return
+        lw = max(1, int(2 * self.s))
+        bones = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 11), (6, 12), (11, 13), (13, 15), (12, 14), (14, 16),
+                 (5, 6), (11, 12), (3, 5), (4, 6)]
+        for a, b in bones:
+            if _ok(p[a]) and _ok(p[b]):
+                cv2.line(img, _pt(p[a]), _pt(p[b]), RIDER_BOX, lw, cv2.LINE_AA)
+        for i in range(3, 17):
+            if _ok(p[i]):
+                cv2.circle(img, _pt(p[i]), max(2, int(3 * self.s)), (255, 255, 255), -1, cv2.LINE_AA)
+        # ear-shoulder-hip-heel reference: vertical line through the hip
+        for hip, sho, ankle in ((11, 5, 15), (12, 6, 16)):
+            if _ok(p[hip]) and _ok(p[sho]):
+                x = _pt(p[hip])[0]
+                top = int(min(p[sho][1], p[3][1] if _ok(p[3]) else p[sho][1]) - 10 * self.s)
+                bottom = int((p[ankle][1] if _ok(p[ankle]) else p[hip][1]) + 10 * self.s)
+                for y in range(top, bottom, max(4, int(8 * self.s))):
+                    cv2.line(img, (x, y), (x, y + max(2, int(4 * self.s))), (255, 255, 255), 1, cv2.LINE_AA)
+                break
+
     def _hud(self, img, hud: dict) -> None:
         s = self.s
         lines = [f"{k}: {v}" for k, v in hud.items()]

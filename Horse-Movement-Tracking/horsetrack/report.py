@@ -17,7 +17,7 @@ def _limb_of(col: str) -> str | None:
     return parts[1] if len(parts) > 1 and parts[1] in LIMB_COLORS else None
 
 
-def make_plots(metrics: pd.DataFrame, out_dir: Path) -> list[Path]:
+def make_plots(metrics: pd.DataFrame, out_dir: Path, symmetry: dict | None = None) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     t = metrics["time_s"]
     paths = []
@@ -70,6 +70,41 @@ def make_plots(metrics: pd.DataFrame, out_dir: Path) -> list[Path]:
         ax.set(yticks=[], xlabel="time (s)", title="Detection timeline")
         ax.legend(loc="upper right", fontsize=8)
         paths.append(_save(fig, out_dir / "timeline.png"))
+    if symmetry and symmetry.get("available") and symmetry.get("per_stride"):
+        parts = [k for k in ("head", "withers", "pelvis") if symmetry["per_stride"].get(k)]
+        fig, axes = plt.subplots(1, len(parts), figsize=(4 * len(parts), 3.6), squeeze=False)
+        for ax, k in zip(axes[0], parts):
+            df = pd.DataFrame(symmetry["per_stride"][k])
+            x = range(1, len(df) + 1)
+            ax.bar([i - 0.2 for i in x], 100 * df["dmin"], 0.4, label="DMin", color="#1b6f8a")
+            ax.bar([i + 0.2 for i in x], 100 * df["dmax"], 0.4, label="DMax", color="#a0c4d2")
+            ax.axhline(0, color="k", lw=0.6)
+            a, b = {"head": ("LF", "RF"), "withers": ("LF", "RF"), "pelvis": ("RH", "LH")}[k]
+            ax.set(title=f"{k}  (+ → {a}, − → {b})", xlabel="stride", ylabel="% body length")
+            ax.grid(alpha=0.3, axis="y")
+        axes[0][0].legend(fontsize=8)
+        fig.suptitle("Vertical movement asymmetry per stride (+ = less movement in LF/RH diagonal half)")
+        paths.append(_save(fig, out_dir / "asymmetry_per_stride.png"))
+
+    rider_cols = [c for c in ("rider_trunk_lean", "rider_knee_angle", "rider_hip_angle", "rider_elbow_angle")
+                  if c in metrics and metrics[c].notna().sum() > 5]
+    if rider_cols:
+        fig, axes = plt.subplots(len(rider_cols) + 1, 1, figsize=(11, 2.2 * (len(rider_cols) + 1)), sharex=True)
+        for ax, c in zip(axes, rider_cols):
+            ax.plot(t, metrics[c], color="#e07a1f", lw=1.3)
+            ax.set_ylabel(c.replace("rider_", "").replace("_", " ") + " (°)")
+            ax.grid(alpha=0.3)
+        ax = axes[-1]
+        for c, lab in (("rider_ear_offset", "ear"), ("rider_shoulder_offset", "shoulder"), ("rider_heel_offset", "heel")):
+            if c in metrics:
+                ax.plot(t, metrics[c], lw=1.2, label=lab)
+        ax.axhline(0, color="k", lw=0.6)
+        ax.set_ylabel("ahead of hip\n(trunk lengths)")
+        ax.legend(ncol=3, fontsize=8)
+        ax.grid(alpha=0.3)
+        axes[0].set_title("Rider position")
+        axes[-1].set_xlabel("time (s)")
+        paths.append(_save(fig, out_dir / "rider_position.png"))
     return paths
 
 

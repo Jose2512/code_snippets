@@ -32,6 +32,9 @@ with st.sidebar:
     max_frames = st.number_input("Max frames (0 = all)", 0, 100000, 0)
     horse_id = st.number_input("Horse track ID (0 = auto)", 0, 1000, 0)
     mask_rider = st.checkbox("Paint out rider before pose estimation", False)
+    analyze_rider = st.checkbox("Analyse rider position", True)
+    body_cm = st.number_input("Horse body length, neck to tail root (cm, 0 = unknown)", 0, 300, 0,
+                              help="Converts asymmetry and hand movement to millimetres")
 
 uploaded = st.file_uploader("Horse video", type=["mp4", "mov", "avi", "mkv", "m4v"])
 
@@ -42,7 +45,8 @@ if uploaded and st.button("Analyse", type="primary"):
     cfg = Config(video=str(video), output_dir=str(work / "results"), detector=detector,
                  pose_backend=backend, pose_model=pose_model or None, layout=layout or None,
                  device=device or None, kpt_thr=kpt_thr, every=int(every),
-                 max_frames=int(max_frames) or None, horse_id=int(horse_id) or None, mask_rider=mask_rider)
+                 max_frames=int(max_frames) or None, horse_id=int(horse_id) or None, mask_rider=mask_rider,
+                 analyze_rider=analyze_rider, body_length_cm=float(body_cm) or None)
     bar = st.progress(0.0, text="Starting…")
 
     def progress(stage: str, i: int, total: int) -> None:
@@ -77,6 +81,37 @@ if res:
         if g["left_right_rom_asymmetry_pct"]:
             st.subheader("Left/right asymmetry (%)")
             st.json({k: round(v, 1) for k, v in g["left_right_rom_asymmetry_pct"].items() if v is not None})
+
+    sym = s.get("symmetry", {})
+    if sym.get("available"):
+        st.subheader("Vertical movement asymmetry (lameness screening)")
+        if not sym["valid_for_lameness"]:
+            st.warning("Asymmetry is only interpretable at trot on a straight line.")
+        rows = []
+        for k in ("head", "withers", "pelvis"):
+            r = sym.get(k)
+            if r:
+                rows.append({"part": k, "DMin % BL": round(r["dmin_pct_bl"], 2), "DMax % BL": round(r["dmax_pct_bl"], 2),
+                             "DMin mm": round(r["dmin_mm"], 1) if "dmin_mm" in r else None,
+                             "less drop during": r["less_drop_during_stance_of"], "strides": r["strides"],
+                             "consistency %": round(r["consistency_pct"])})
+        st.dataframe(rows)
+        st.caption("Educational orientation only, not a veterinary diagnosis. A hindlimb lameness can cause a "
+                   "compensatory head nod: read head, withers and pelvis together and confirm with a veterinarian.")
+
+    rd = s.get("rider", {})
+    if rd.get("available"):
+        st.subheader(f"Rider position ({rd['side_measured']} side)")
+        rc = st.columns(4)
+        if rd.get("trunk_lean"):
+            rc[0].metric("Trunk lean", f"{rd['trunk_lean']['mean']:+.0f}°", f"sd {rd['trunk_lean']['sd']:.1f}°", delta_color="off")
+        if rd.get("knee_angle"):
+            rc[1].metric("Knee angle", f"{rd['knee_angle']['mean']:.0f}°")
+        rc[2].metric("Leg", rd.get("leg_position", "–"))
+        diag = rd.get("diagonal", {}).get("sits_with")
+        rc[3].metric("Trot", rd.get("trot_style", "–"), f"sits with {diag}" if diag and diag != "undetermined" else None,
+                     delta_color="off")
+        st.caption("2-D view of the rider side facing the camera. Educational feedback; validate with an instructor.")
 
     for p in res.plots:
         st.image(str(p), width="stretch")

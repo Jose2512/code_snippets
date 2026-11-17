@@ -40,6 +40,9 @@ class KeypointLayout:
     eyes: tuple[str, ...] = ()
     # Body axis (front, rear), e.g. ("Neck", "Root_of_tail").
     body_axis: tuple[str, str] = ("Neck", "Root_of_tail")
+    # Points used for vertical-movement asymmetry (default: ends of the body axis).
+    withers: str | None = None
+    pelvis: str | None = None
     flip_pairs: tuple[tuple[str, str], ...] = field(default=())
 
     def __post_init__(self) -> None:
@@ -48,6 +51,7 @@ class KeypointLayout:
         refs += [n for a in self.angles for n in (a.a, a.vertex, a.c)]
         refs += [n for chain in self.limbs.values() for n in chain]
         refs += [self.nose, self.neck, *self.eyes, *self.body_axis]
+        refs += [n for n in (self.withers, self.pelvis) if n]
         if self.poll:
             refs.append(self.poll)
         unknown = sorted(set(refs) - names)
@@ -63,6 +67,14 @@ class KeypointLayout:
 
     def idx(self, name: str) -> int:
         return self.keypoints.index(name)
+
+    @property
+    def withers_point(self) -> str:
+        return self.withers or self.body_axis[0]
+
+    @property
+    def pelvis_point(self) -> str:
+        return self.pelvis or self.body_axis[1]
 
     @property
     def hooves(self) -> dict[str, str]:
@@ -90,6 +102,8 @@ class KeypointLayout:
             poll=head.get("poll"),
             eyes=tuple(head.get("eyes", ())),
             body_axis=tuple(d["body_axis"]),
+            withers=d.get("withers"),
+            pelvis=d.get("pelvis"),
             flip_pairs=tuple(tuple(p) for p in d.get("flip_pairs", [])),
         )
 

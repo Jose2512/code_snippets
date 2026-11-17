@@ -5,6 +5,8 @@ A computer vision app that takes a horse video, **with or without a rider**, and
 - **Leg joints and hooves** for all four legs: joint angles, how far each limb swings forward and back, hoof trajectories
 - **Head position**: nose height, neck elevation, face angle from the vertical, head bob
 - **Gait**: stride frequency, phase between limbs, duty factor, a walk/trot/canter/pace estimate, left/right asymmetry
+- **Lameness screening**: up/down movement asymmetry of the head, withers and pelvis for each stride at trot
+- **Rider position**: trunk lean, ear–shoulder–hip–heel alignment, hip/knee/elbow angles, hand steadiness, rising vs sitting trot and which diagonal the rider sits on
 
 You get an annotated video, CSV files for every frame and keypoint, a JSON summary and charts.
 
@@ -52,6 +54,9 @@ Useful options:
 | `--kpt-thr 0.3` | minimum keypoint confidence |
 | `--layout configs/horse_detailed_layout.json` | use a custom keypoint layout (needs a matching model) |
 | `--no-video` | data only, no annotated video |
+| `--body-length-cm 160` | the horse's real neck-to-tail-root length; asymmetry and hand movement are then also reported in mm |
+| `--no-rider` | skip rider analysis |
+| `--rider-pose-model` | person pose model for the rider (default `yolo11n-pose.pt`, downloaded automatically the first time a rider appears) |
 
 **Web app**
 
@@ -77,7 +82,8 @@ print(res.summary["gait"]["gait_estimate"], res.metrics.head())
 | `keypoints.csv` | per frame and keypoint: raw x/y, confidence, smoothed x/y, status (`detected` / `interpolated` / `occluded_by_rider` / `missing`) |
 | `metrics.csv` | per frame: rider present, joint angles, limb protraction, body length, nose position, head height, neck elevation, face inclination |
 | `summary.json` | stride frequency, gait estimate, inter-limb phase lags, duty factor, hoof strikes, joint ROM, left/right asymmetry, head summary, keypoint visibility |
-| `plots/*.png` | joint angles, limb protraction, head position, detection timeline |
+| `rider_keypoints.csv` | rider joints per frame (COCO 17 keypoints), raw and smoothed |
+| `plots/*.png` | joint angles, limb protraction, head position, detection timeline, asymmetry per stride, rider position |
 
 ### Measures
 
@@ -90,6 +96,41 @@ Measures are taken relative to the horse's facing direction, so the same numbers
 - **Neck elevation**: angle of the neck→nose line above the body axis.
 - **Face inclination**: angle of the eyes/poll→nose line from the vertical. 0° means the face is vertical, positive means in front of the vertical, negative means behind it.
 - **Head bob**: 5th–95th percentile range of head height across the clip.
+
+## Lameness screening: vertical movement asymmetry
+
+This follows the approach of published objective lameness methods (sensor-based and smartphone-based). At trot, a sound horse lowers and raises its head, withers and pelvis twice per stride, equally for both diagonal pairs. A horse protecting a painful limb **drops less while that limb bears weight**.
+
+1. Hoof strikes of the left fore (LF) and right fore (RF) split every stride into the LF/RH diagonal stance (first half) and the RF/LH diagonal stance (second half).
+2. The vertical movement of the head (eyes or poll), withers and pelvis (tail root or croup) is detrended over one stride. It is expressed in % of body length, and in mm with `--body-length-cm`.
+3. For each stride, **DMin** = difference between the two lowest points and **DMax** = difference between the two highest points. `summary.json → symmetry` reports the median, spread, number of strides and consistency of the sign.
+
+| signal | DMin > 0 | DMin < 0 |
+|---|---|---|
+| head / withers | less drop during **LF** stance | less drop during **RF** stance |
+| pelvis | less drop during **RH** stance | less drop during **LH** stance |
+
+How to read the results:
+
+- **Only valid at trot**, in a straight line, filmed from the side with a fixed camera (on a tripod). Record at least 8–10 strides; 60 fps or more is better.
+- A hind-limb lameness can cause a **compensatory head nod** that looks like a front-limb lameness. Read the head, withers and pelvis together.
+- With `--body-length-cm`, values are compared with reference values reported in the literature for inertial sensors (6 mm head, 3 mm pelvis). These references are **not validated for this video method**. Published systems repeat to within a few mm, and individual sound horses are often asymmetric.
+- This is **educational guidance only, not a veterinary diagnosis**. Confirm any finding with a veterinarian.
+
+## Rider position and technique
+
+When a rider is detected, a person pose model (YOLO11-pose, COCO keypoints) measures the side of the rider facing the camera. The far leg is hidden by the horse.
+
+| measure | meaning |
+|---|---|
+| `trunk_lean` | hip→shoulder angle from vertical (+ forward, − behind) |
+| `ear_offset`, `shoulder_offset`, `heel_offset` | horizontal distance from the vertical line through the hip, in trunk lengths. The classical ear–shoulder–hip–heel alignment puts all three near 0. The heel ahead of the hip suggests a chair-seat tendency; behind it, a fork-seat tendency. |
+| `hip_angle`, `knee_angle`, `elbow_angle` | joint angles in degrees |
+| `hand_height`, hand variability | hand height above the hip, and how much the hand moves relative to the horse's withers within each stride (steadiness, independence) |
+| `seat_height`, trot style | movement of the rider's hip relative to the horse. Once per stride means **rising trot**; twice per stride means **sitting trot / two-point seat** |
+| diagonal | in rising trot, which foreleg is on the ground when the rider sits. By convention the rider sits when the **outside** foreleg is on the ground: LF on a right rein (clockwise), RF on a left rein (anticlockwise). |
+
+Published studies show that rider posture and asymmetry change how the horse moves. For example, uneven stirrups changed the movement of the horse's back, and the rising-trot diagonal changed pelvic symmetry. Use the rider and horse results together. This is feedback for training; validate it with a qualified instructor.
 
 ## With or without a rider
 
@@ -123,10 +164,11 @@ pip install pytest torch onnx
 python -m pytest -q tests
 ```
 
-The tests cover geometry, smoothing, gait classification on synthetic walk/trot/pace/canter signals, rider vs handler association, track following, and the ONNX backend's mapping from heatmaps back to pixels.
+The tests cover asymmetry direction (forelimb vs hindlimb) and mm conversion, rider posture measures, rising-trot diagonal detection, geometry, smoothing, gait classification on synthetic walk/trot/pace/canter signals, rider vs handler association, track following, and the ONNX backend's mapping from heatmaps back to pixels.
 
 ## Limitations
 
 - Accuracy depends on the pose model. Public AP-10K models cover many animal species and are not specialised for horses. Fine-tune on your own footage for clinical-grade work.
 - Single camera, 2-D only. Angles are distorted when the horse moves toward or away from the camera.
-- The gait label and asymmetry figures are **estimates for orientation, not a veterinary diagnosis**.
+- The gait label, movement asymmetry and rider feedback are **estimates for orientation, not a veterinary diagnosis or a technique assessment**.
+- Keypoint jitter of a few pixels can be several mm. Use high-resolution video in which the horse fills a large part of the frame, and rely on medians over many strides.

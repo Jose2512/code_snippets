@@ -38,6 +38,8 @@
   },
   "head": {"nose": "Nose", "neck": "Withers", "poll": "Poll", "eyes": ["L_Eye", "R_Eye"]},
   "body_axis": ["Withers", "Croup"],
+  "withers": "Withers",
+  "pelvis": "Croup",
   "flip_pairs": [
     ["L_Eye", "R_Eye"],
     ["LF_Shoulder", "RF_Shoulder"], ["LF_Elbow", "RF_Elbow"], ["LF_Carpus", "RF_Carpus"], ["LF_Fetlock", "RF_Fetlock"], ["LF_Hoof", "RF_Hoof"],

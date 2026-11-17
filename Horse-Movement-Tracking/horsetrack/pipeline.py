@@ -25,6 +25,8 @@ from .kinematics import compute_metrics
 from .layouts import KeypointLayout, load_layout
 from .pose import PoseBackend, create_pose_backend
 from .report import make_plots
+from .rider import COCO_KPTS, RiderPose, analyze_rider, compute_rider_metrics
+from .symmetry import analyze_symmetry
 from .smoothing import smooth_keypoints
 from .visualize import Renderer
 
@@ -51,6 +53,9 @@ class Config:
     max_gap_s: float = 0.25
     smooth_window_s: float = 0.15
     render: bool = True
+    analyze_rider: bool = True
+    rider_pose_model: str = "yolo11n-pose.pt"  # COCO person pose model for the rider
+    body_length_cm: float | None = None  # real neck->tail-root length, converts results to mm
 
 
 @dataclass
@@ -146,7 +151,8 @@ def _occluded_by_rider(xy: np.ndarray, conf: np.ndarray, rider_mask: np.ndarray,
 
 
 def run(cfg: Config, progress: ProgressFn | None = None,
-        detector: HorseDetector | None = None, pose: PoseBackend | None = None) -> Result:
+        detector: HorseDetector | None = None, pose: PoseBackend | None = None,
+        rider_pose: RiderPose | None = None) -> Result:
     progress = progress or (lambda *_: None)
     out = Path(cfg.output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -166,6 +172,8 @@ def run(cfg: Config, progress: ProgressFn | None = None,
     K = layout.num_keypoints
     frame_idx, raw_xy, raw_conf, occluded = [], [], [], []
     horse_boxes, rider_boxes, track_ids = [], [], []
+    rider_xy_l, rider_conf_l = [], []
+    nan17 = np.full((17, 2), np.nan, np.float32)
     nan4 = np.full(4, np.nan, np.float32)
 
     # ---------------------------------------------------------------- pass 1
@@ -186,6 +194,13 @@ def run(cfg: Config, progress: ProgressFn | None = None,
             xy, cf = pose.estimate(pose_frame, horse.box)
             if rider_mask is not None:
                 occ = _occluded_by_rider(xy, cf, rider_mask, layout, cfg.rider_kpt_thr)
+        rxy, rcf = nan17, np.zeros(17, np.float32)
+        if rider is not None and cfg.analyze_rider:
+            if rider_pose is None:  # loaded on first use: no download for unridden clips
+                rider_pose = RiderPose(cfg.rider_pose_model, cfg.device)
+            rxy, rcf = rider_pose.estimate(frame, rider.box)
+        rider_xy_l.append(rxy)
+        rider_conf_l.append(rcf)
         frame_idx.append(i)
         raw_xy.append(xy)
         raw_conf.append(cf)
@@ -218,6 +233,24 @@ def run(cfg: Config, progress: ProgressFn | None = None,
     metrics.insert(2, "horse_detected", horse_detected)
     metrics.insert(3, "rider_present", rider_present)
     metrics.insert(4, "horse_track_id", track_ids)
+
+    gait_summary = gait.analyze(metrics, fps)
+    symmetry = analyze_symmetry(xy_s, layout, metrics, gait_summary, fps, cfg.body_length_cm)
+
+    rider_xy = np.stack(rider_xy_l)
+    rider_conf = np.stack(rider_conf_l)
+    rider_xy_s = np.full_like(rider_xy, np.nan, dtype=np.float64)
+    rider_summary: dict = {"available": False, "reason": "no rider" if not rider_present.any() else "rider analysis disabled"}
+    if cfg.analyze_rider and rider_present.any():
+        rv = (rider_conf >= cfg.kpt_thr) & rider_present[:, None] & np.isfinite(rider_xy[..., 0])
+        rider_xy_s, _ = smooth_keypoints(np.where(rv[..., None], rider_xy, np.nan), fps,
+                                         cfg.max_gap_s, cfg.smooth_window_s)
+        rider_xy_s[~rider_present] = np.nan
+        rm, side = compute_rider_metrics(rider_xy_s, np.where(rv, rider_conf, 0), xy_s, layout,
+                                         metrics["direction"].to_numpy(), metrics["body_length_px"].to_numpy())
+        metrics = pd.concat([metrics, rm], axis=1)
+        rider_summary = analyze_rider(rm, metrics, gait_summary, fps, side, cfg.body_length_cm)
+        _write_rider_keypoints_csv(out / "rider_keypoints.csv", frame_idx, times, rider_xy, rider_conf, rider_xy_s)
     metrics.to_csv(out / "metrics.csv", index=False)
 
     _write_keypoints_csv(out / "keypoints.csv", frame_idx, times, layout, raw_xy, raw_conf,
@@ -232,19 +265,23 @@ def run(cfg: Config, progress: ProgressFn | None = None,
         "ridden": bool(rider_present.mean() > 0.3),
         "keypoint_visibility_pct": {name: float(100 * valid[:, k].mean()) for k, name in enumerate(layout.keypoints)},
         "occluded_by_rider_pct": float(100 * occluded.mean()),
-        "gait": gait.analyze(metrics, fps),
+        "gait": gait_summary,
+        "symmetry": symmetry,
+        "rider": rider_summary,
         "config": asdict(cfg),
         "notes": ["All angles are 2-D projections; use a lateral (side-on) view for meaningful values.",
-                  "The gait label is a heuristic estimate, not a veterinary assessment."],
+                  "The gait label is a heuristic estimate, not a veterinary assessment.",
+                  "Asymmetry and rider metrics are educational orientation; confirm clinical findings "
+                  "with a veterinarian and technique with a qualified instructor."],
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=_json_default), encoding="utf-8")
-    plots = make_plots(metrics, out / "plots")
+    plots = make_plots(metrics, out / "plots", symmetry)
 
     # ---------------------------------------------------------------- pass 2
     video_path = None
     if cfg.render:
         video_path = _render(cfg, layout, fps, (W, H), frame_idx, xy_s, valid, metrics,
-                             horse_boxes, rider_boxes, summary, out, progress)
+                             horse_boxes, rider_boxes, summary, out, progress, rider_xy_s)
     return Result(out, summary, metrics, video_path, plots)
 
 
@@ -275,12 +312,21 @@ def _write_keypoints_csv(path, frame_idx, times, layout, raw_xy, raw_conf, xy_s,
     df.to_csv(path, index=False, float_format="%.2f")
 
 
+def _write_rider_keypoints_csv(path, frame_idx, times, raw_xy, conf, xy_s):
+    T, K = conf.shape
+    pd.DataFrame({
+        "frame": np.repeat(frame_idx, K), "time_s": np.round(np.repeat(times, K), 4),
+        "keypoint": np.tile(COCO_KPTS, T), "x_raw": raw_xy[..., 0].ravel(), "y_raw": raw_xy[..., 1].ravel(),
+        "confidence": conf.ravel(), "x": xy_s[..., 0].ravel(), "y": xy_s[..., 1].ravel(),
+    }).dropna(subset=["x_raw", "x"], how="all").to_csv(path, index=False, float_format="%.2f")
+
+
 def _fmt(v, spec=".0f", unit=""):
     return f"{v:{spec}}{unit}" if v is not None and np.isfinite(v) else "-"
 
 
 def _render(cfg, layout, fps, size, frame_idx, xy_s, valid, metrics, horse_boxes, rider_boxes,
-            summary, out, progress) -> Path:
+            summary, out, progress, rider_xy=None) -> Path:
     raw_path = out / "annotated_raw.mp4"
     writer = cv2.VideoWriter(str(raw_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
     renderer = Renderer(layout, fps, frame_height=size[1])
@@ -301,9 +347,15 @@ def _render(cfg, layout, fps, size, frame_idx, xy_s, valid, metrics, horse_boxes
             "gait (clip)": gait_txt,
             "stride freq": freq_txt,
         }
+        if m["rider_present"] and "rider_trunk_lean" in m:
+            hud["rider trunk"] = _fmt(m.get("rider_trunk_lean"), "+.0f", " deg")
+            hud["rider knee"] = _fmt(m.get("rider_knee_angle"), ".0f", " deg")
+            hud["heel vs hip"] = _fmt(m.get("rider_heel_offset"), "+.2f", " TL")
         if not m["horse_detected"]:
             hud["status"] = "horse not detected"
         img = renderer.draw(frame, xy_s[n], valid[n], m, horse_boxes[n], rider_boxes[n], hud)
+        if rider_xy is not None:
+            renderer.draw_rider(img, rider_xy[n], m.get("direction", 1.0))
         writer.write(img)
         progress("rendering", n + 1, len(rows))
     writer.release()
