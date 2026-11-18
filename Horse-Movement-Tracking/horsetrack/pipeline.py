@@ -106,6 +106,34 @@ def prepare_video(path: str, work_dir: Path) -> str:
     return str(converted)
 
 
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+
+
+def resolve_model(path: str | None, required: bool = False) -> str | None:
+    """Find a model file whether the app is started from the project folder or elsewhere.
+
+    Looks at the path as given (relative to the current folder), then relative to
+    the project folder, then in ``<project>/models``. A bare Ultralytics name that
+    is not found anywhere (e.g. ``yolo11n-pose.pt``) is returned unchanged so it is
+    downloaded automatically; a required file that is missing raises a clear error.
+    """
+    if not path:
+        return path
+    p = Path(path).expanduser()
+    candidates = [p] if p.is_absolute() else [Path.cwd() / p, PROJECT_DIR / p, PROJECT_DIR / "models" / p.name]
+    candidates = list(dict.fromkeys(c.resolve() for c in candidates))
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    if required:
+        searched = "\n  ".join(str(c) for c in candidates)
+        raise FileNotFoundError(
+            f"Model file not found: {path}\nSearched:\n  {searched}\n"
+            "Download it with `python scripts/download_models.py` or give the full path."
+        )
+    return path
+
+
 def _video_info(path: str) -> tuple[float, int, int, int]:
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
@@ -158,7 +186,13 @@ def run(cfg: Config, progress: ProgressFn | None = None,
     out.mkdir(parents=True, exist_ok=True)
     layout = pose.layout if pose is not None else load_layout(cfg.layout)
 
-    cfg = replace(cfg, video=prepare_video(cfg.video, out))
+    cfg = replace(
+        cfg,
+        video=prepare_video(cfg.video, out),
+        pose_model=resolve_model(cfg.pose_model, required=pose is None and cfg.pose_backend in ("vitpose", "onnx", "yolo")),
+        detector=resolve_model(cfg.detector),
+        rider_pose_model=resolve_model(cfg.rider_pose_model),
+    )
     fps_src, n_src, W, H = _video_info(cfg.video)
     fps = fps_src / cfg.every
     total = (n_src + cfg.every - 1) // cfg.every if n_src > 0 else 0

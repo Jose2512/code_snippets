@@ -155,3 +155,18 @@ def test_prepare_video_converts_unreadable_file(tmp_path):
                     "-t", "1", "-c:v", "libx265", "-tag:v", "hvc1", str(src)], check=True)
     out = prepare_video(str(src), tmp_path / "out")
     assert _readable(out)
+
+
+def test_resolve_model_from_any_folder(tmp_path, monkeypatch):
+    from horsetrack import pipeline
+
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "vitpose-b-ap10k.onnx").write_bytes(b"x")
+    monkeypatch.setattr(pipeline, "PROJECT_DIR", tmp_path)
+    monkeypatch.chdir(tmp_path.parent)  # started from another folder
+    assert pipeline.resolve_model("models/vitpose-b-ap10k.onnx") == str(models / "vitpose-b-ap10k.onnx")
+    assert pipeline.resolve_model("vitpose-b-ap10k.onnx") == str(models / "vitpose-b-ap10k.onnx")
+    assert pipeline.resolve_model("yolo11n-pose.pt") == "yolo11n-pose.pt"  # left for auto-download
+    with pytest.raises(FileNotFoundError, match="download_models"):
+        pipeline.resolve_model("models/missing.onnx", required=True)
